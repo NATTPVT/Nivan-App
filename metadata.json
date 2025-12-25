@@ -1,0 +1,5 @@
+{
+  "name": "MedPulse Connect",
+  "description": "A comprehensive patient management and appointment reservation system featuring intelligent session tracking, automated messaging simulations, and AI-powered care instruction generation.",
+  "requestFramePermissions": []
+}
