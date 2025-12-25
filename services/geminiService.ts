@@ -1,4 +1,43 @@
 
+/**
+ * This service now calls our secure Netlify Function 
+ * instead of talking to Google Gemini directly from the browser.
+ */
+export async function generateWelcomeMessage(patient: any) {
+  // 1. Prepare the prompt for the AI
+  const prompt = `Write a professional and friendly welcome message for a new patient at MedPulse Connect clinic. 
+  Patient Name: ${patient.name}
+  The message should be warm and mention we are looking forward to providing them with excellent care.`;
+
+  try {
+    // 2. Call your Netlify function (the middleman)
+    const response = await fetch('/.netlify/functions/gemini', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ prompt })
+    });
+
+    if (!response.ok) {
+      throw new Error('Network response was not ok');
+    }
+
+    const data = await response.json();
+
+    // 3. Extract the AI's response text from the Gemini data format
+    // This matches the structure returned by the Gemini API
+    return data.candidates[0].content.parts[0].text;
+    
+  } catch (error) {
+    console.error("AI Service Error:", error);
+    // Fallback message if the AI fails or the key is missing
+    return `Welcome to MedPulse Connect, ${patient.name}! We're glad to have you with us.`;
+  }
+}
+
+//due to changes to keep API secure below code is replaced by above code 
+/*
 import { GoogleGenAI, Type } from "@google/genai";
 import { Patient, CLINIC_TREATMENTS } from "../types";
 
@@ -50,3 +89,9 @@ export const consultPatientAI = async (concern: string) => {
   });
   return response.text || "Based on your concern, we recommend a consultation with our specialist to determine the best plan.";
 };
+*/
+
+
+
+
+
