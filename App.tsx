@@ -1,5 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
+import { supabase } from './supabaseClient'; // Import the client
 import { View, Patient, Appointment, SessionRecord, Notification, UserRole, ClinicSettings, ClinicStaff } from './types';
 import Sidebar from './components/Sidebar';
 import AuthView from './components/AuthView';
@@ -13,11 +13,6 @@ import SettingsView from './views/SettingsView';
 import PhotosView from './views/PhotosView';
 import { generateWelcomeMessage } from './services/geminiService';
 
-const DEFAULT_STAFF: ClinicStaff[] = [
-  { id: 'admin', name: 'System Admin', username: 'admin', password: '123', specialty: 'Management', role: 'admin' },
-  { id: 'doc1', name: 'Dr. Sarah', username: 'sarah', password: '123', specialty: 'Facial', role: 'doctor' },
-];
-
 const App: React.FC = () => {
   const [role, setRole] = useState<UserRole | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -25,7 +20,7 @@ const App: React.FC = () => {
   
   // Data State
   const [patients, setPatients] = useState<Patient[]>([]);
-  const [staff, setStaff] = useState<ClinicStaff[]>(DEFAULT_STAFF);
+  const [staff, setStaff] = useState<ClinicStaff[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -33,50 +28,64 @@ const App: React.FC = () => {
     aiConsultationEnabled: true,
     photoConsultationEnabled: true,
     restrictStaffLogs: false,
-    patientVisibility: {
-      summary: true,
-      results: true,
-      careInstructions: true
-    }
+    patientVisibility: { summary: true, results: true, careInstructions: true }
   });
 
+  // --- STEP 1: LOAD DATA FROM SUPABASE ---
   useEffect(() => {
-    const savedPatients = JSON.parse(localStorage.getItem('mp_patients') || '[]');
-    const savedStaff = JSON.parse(localStorage.getItem('mp_staff') || JSON.stringify(DEFAULT_STAFF));
-    const savedAppointments = JSON.parse(localStorage.getItem('mp_appointments') || '[]');
-    const savedSessions = JSON.parse(localStorage.getItem('mp_sessions') || '[]');
-    const savedNotifications = JSON.parse(localStorage.getItem('mp_notifications') || '[]');
-    const savedSettings = JSON.parse(localStorage.getItem('mp_settings') || JSON.stringify(settings));
-    const savedSession = JSON.parse(localStorage.getItem('mp_user_session') || 'null');
+    const fetchData = async () => {
+      try {
+        // Fetch Patients
+        const { data: pts } = await supabase.from('patients').select('*').order('created_at', { ascending: false });
+        if (pts) setPatients(pts);
 
-    setPatients(savedPatients);
-    setStaff(savedStaff);
-    setAppointments(savedAppointments);
-    setSessions(savedSessions);
-    setNotifications(savedNotifications);
-    setSettings(savedSettings);
+        // Fetch Staff
+        const { data: stf } = await supabase.from('staff').select('*');
+        if (stf) setStaff(stf);
 
-    if (savedSession) {
-      setRole(savedSession.role);
-      setCurrentUserId(savedSession.id);
-      setView(savedSession.role === 'patient' ? 'patient-portal' : 'dashboard');
-    }
+        // Fetch Appointments
+        const { data: apts } = await supabase.from('appointments').select('*');
+        if (apts) setAppointments(apts);
+
+        // Fetch Sessions
+        const { data: sess } = await supabase.from('sessions').select('*').order('created_at', { ascending: false });
+        if (sess) setSessions(sess);
+
+        // Fetch Settings
+        const { data: sett } = await supabase.from('settings').select('*').single();
+        if (sett) {
+          setSettings({
+            aiConsultationEnabled: sett.ai_consultation_enabled,
+            aiStaffEnabled: sett.ai_staff_enabled,
+            photoConsultationEnabled: sett.photo_consultation_enabled,
+            restrictStaffLogs: sett.restrict_staff_logs,
+            patientVisibility: sett.patient_visibility
+          });
+        }
+
+        // Keep local session for login persistence (standard practice)
+        const savedSession = JSON.parse(localStorage.getItem('mp_user_session') || 'null');
+        if (savedSession) {
+          setRole(savedSession.role);
+          setCurrentUserId(savedSession.id);
+          setView(savedSession.role === 'patient' ? 'patient-portal' : 'dashboard');
+        }
+      } catch (err) {
+        console.error("Error loading data from Supabase:", err);
+      }
+    };
+
+    fetchData();
   }, []);
 
+  // --- STEP 2: PERSIST LOGIN SESSION ONLY ---
   useEffect(() => {
-    localStorage.setItem('mp_patients', JSON.stringify(patients));
-    localStorage.setItem('mp_staff', JSON.stringify(staff));
-    localStorage.setItem('mp_appointments', JSON.stringify(appointments));
-    localStorage.setItem('mp_sessions', JSON.stringify(sessions));
-    localStorage.setItem('mp_notifications', JSON.stringify(notifications));
-    localStorage.setItem('mp_settings', JSON.stringify(settings));
-    
     if (role && currentUserId) {
       localStorage.setItem('mp_user_session', JSON.stringify({ role, id: currentUserId }));
     } else {
       localStorage.removeItem('mp_user_session');
     }
-  }, [patients, staff, appointments, sessions, notifications, settings, role, currentUserId]);
+  }, [role, currentUserId]);
 
   const handleLogin = (role: UserRole, id: string) => {
     setRole(role);
@@ -84,34 +93,48 @@ const App: React.FC = () => {
     setView(role === 'patient' ? 'patient-portal' : 'dashboard');
   };
 
+  // --- STEP 3: REGISTER PATIENT IN SUPABASE ---
   const handleRegisterPatient = async (name: string, phone: string, pass: string) => {
-    const id = crypto.randomUUID();
-    const newPatient: Patient = {
-      id,
+    const newPatientData = {
       name,
       phone,
       password: pass,
       email: '',
       dob: '',
       notes: 'Self-registered via website.',
-      createdAt: new Date().toISOString()
     };
     
-    setPatients(prev => [newPatient, ...prev]);
+    // Save to Supabase
+    const { data, error } = await supabase
+      .from('patients')
+      .insert([newPatientData])
+      .select()
+      .single();
 
-    // Send automated welcome
-    const welcomeContent = await generateWelcomeMessage(newPatient);
-    setNotifications(prev => [{
-      id: crypto.randomUUID(),
-      patientId: id,
-      type: 'welcome',
-      channel: 'WhatsApp',
-      content: welcomeContent,
-      sentAt: new Date().toISOString(),
-      status: 'sent'
-    }, ...prev]);
+    if (error) {
+      alert("Error registering: " + error.message);
+      return;
+    }
 
-    handleLogin('patient', id);
+    if (data) {
+      setPatients(prev => [data, ...prev]);
+
+      // Generate Welcome Message
+      const welcomeContent = await generateWelcomeMessage(data);
+      
+      // Save Notification to Supabase
+      const { data: notif } = await supabase.from('notifications').insert([{
+        patient_id: data.id,
+        type: 'welcome',
+        channel: 'WhatsApp',
+        content: welcomeContent,
+        status: 'sent'
+      }]).select().single();
+
+      if (notif) setNotifications(prev => [notif, ...prev]);
+
+      handleLogin('patient', data.id);
+    }
   };
 
   const handleLogout = () => {
@@ -120,6 +143,7 @@ const App: React.FC = () => {
     setView('dashboard');
   };
 
+  // --- RENDER LOGIC (Remains mostly the same) ---
   if (!role || !currentUserId) {
     return (
       <AuthView 
@@ -155,55 +179,17 @@ const App: React.FC = () => {
 
     switch(view) {
       case 'dashboard': 
-        return <Dashboard 
-          patients={patients} 
-          appointments={filteredAppointments} 
-          onNavigate={setView} 
-          role={role}
-          staffName={currentUser?.name}
-        />;
+        return <Dashboard patients={patients} appointments={filteredAppointments} onNavigate={setView} role={role} staffName={currentUser?.name} />;
       case 'patients': 
-        return <PatientsView 
-          patients={patients} 
-          setPatients={setPatients} 
-          notifications={notifications} 
-          setNotifications={setNotifications}
-          sessions={sessions}
-          role={role}
-        />;
+        return <PatientsView patients={patients} setPatients={setPatients} notifications={notifications} setNotifications={setNotifications} sessions={sessions} role={role} />;
       case 'appointments': 
-        return <AppointmentsView 
-          appointments={appointments} 
-          setAppointments={setAppointments} 
-          patients={patients} 
-          notifications={notifications} 
-          setNotifications={setNotifications} 
-          role={role}
-          currentStaffId={currentUserId}
-          staff={staff}
-        />;
+        return <AppointmentsView appointments={appointments} setAppointments={setAppointments} patients={patients} notifications={notifications} setNotifications={setNotifications} role={role} currentStaffId={currentUserId} staff={staff} />;
       case 'sessions': 
-        return <SessionsView 
-          sessions={sessions} 
-          setSessions={setSessions} 
-          patients={patients} 
-          appointments={appointments} 
-          setAppointments={setAppointments} 
-          role={role}
-          currentStaffId={currentUserId}
-          settings={settings}
-          staff={staff}
-        />;
+        return <SessionsView sessions={sessions} setSessions={setSessions} patients={patients} appointments={appointments} setAppointments={setAppointments} role={role} currentStaffId={currentUserId} settings={settings} staff={staff} />;
       case 'notifications':
         return <NotificationsView notifications={notifications} patients={patients} />;
       case 'settings':
-        return <SettingsView 
-          settings={settings} 
-          setSettings={setSettings} 
-          staff={staff} 
-          setStaff={setStaff} 
-          role={role} 
-        />;
+        return <SettingsView settings={settings} setSettings={setSettings} staff={staff} setStaff={setStaff} role={role} />;
       case 'photos':
         return <PhotosView patients={patients} settings={settings} role={role} currentStaffId={currentUserId} />;
       default: 
@@ -213,13 +199,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex min-h-screen bg-slate-50">
-      <Sidebar 
-        currentView={view} 
-        onViewChange={setView} 
-        role={role} 
-        currentUser={currentUser}
-        onLogout={handleLogout} 
-      />
+      <Sidebar currentView={view} onViewChange={setView} role={role} currentUser={currentUser} onLogout={handleLogout} />
       <main className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-6xl mx-auto">
           {renderView()}
