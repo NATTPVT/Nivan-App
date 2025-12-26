@@ -1,7 +1,7 @@
-
 import React, { useState } from 'react';
-import { Settings, Sparkles, ShieldCheck, ToggleLeft, ToggleRight, UserPlus, Lock, Eye, EyeOff, UserCheck, Trash2 } from 'lucide-react';
+import { Settings, Sparkles, ShieldCheck, ToggleLeft, ToggleRight, UserPlus, Lock, Eye, EyeOff, UserCheck, Trash2, Activity } from 'lucide-react';
 import { ClinicSettings, ClinicStaff, UserRole } from '../types';
+import { supabase } from '../supabaseClient'; // Ensure this path is correct
 
 interface SettingsViewProps {
   settings: ClinicSettings;
@@ -15,24 +15,38 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, setSettings, staf
   const [isAddingStaff, setIsAddingStaff] = useState(false);
   const [newStaff, setNewStaff] = useState({ name: '', username: '', password: '', specialty: 'General' });
 
-  const togglePatientVisibility = (part: keyof ClinicSettings['patientVisibility']) => {
-    setSettings(prev => ({
-      ...prev,
-      patientVisibility: {
-        ...prev.patientVisibility,
-        [part]: !prev.patientVisibility[part]
-      }
-    }));
+  // --- NEW: Helper to update Supabase and State simultaneously ---
+  const updateGlobalSetting = async (columnName: string, value: any, settingsKey: string) => {
+    // 1. Update UI immediately
+    setSettings(prev => ({ ...prev, [settingsKey]: value }));
+
+    // 2. Persist to Supabase
+    const { error } = await supabase
+      .from('settings')
+      .update({ [columnName]: value })
+      .eq('id', 1);
+
+    if (error) console.error(`Error updating ${columnName}:`, error);
+  };
+
+  const togglePatientVisibility = async (part: key0f ClinicSettings['patientVisibility']) => {
+    const newVisibility = {
+      ...settings.patientVisibility,
+      [part]: !settings.patientVisibility[part]
+    };
+    
+    setSettings(prev => ({ ...prev, patientVisibility: newVisibility }));
+
+    await supabase
+      .from('settings')
+      .update({ patient_visibility: newVisibility })
+      .eq('id', 1);
   };
 
   const handleAddStaff = (e: React.FormEvent) => {
     e.preventDefault();
     const id = `doc${Date.now()}`;
-    const staffMember: ClinicStaff = {
-      ...newStaff,
-      id,
-      role: 'doctor'
-    };
+    const staffMember: ClinicStaff = { ...newStaff, id, role: 'doctor' };
     setStaff(prev => [...prev, staffMember]);
     setNewStaff({ name: '', username: '', password: '', specialty: 'General' });
     setIsAddingStaff(false);
@@ -54,6 +68,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, setSettings, staf
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
         <div className="space-y-10">
+          {/* Auth & Privacy Section */}
           <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden">
             <div className="p-10 border-b border-slate-50 flex items-center gap-4">
               <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl shadow-inner">
@@ -67,11 +82,11 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, setSettings, staf
                 <div className="max-w-[70%]">
                   <p className="font-black text-slate-800 text-lg tracking-tight">Secure Staff Encapsulation</p>
                   <p className="text-sm text-slate-400 font-medium leading-relaxed mt-1">
-                    Practitioners can only view records they authored. Master Admin maintains global oversight.
+                    Practitioners can only view records they authored.
                   </p>
                 </div>
                 <button 
-                  onClick={() => setSettings(prev => ({ ...prev, restrictStaffLogs: !prev.restrictStaffLogs }))}
+                  onClick={() => updateGlobalSetting('restrict_staff_logs', !settings.restrictStaffLogs, 'restrictStaffLogs')}
                   className={`transition-all ${settings.restrictStaffLogs ? 'text-blue-600' : 'text-slate-300'}`}
                 >
                   {settings.restrictStaffLogs ? <ToggleRight size={56} /> : <ToggleLeft size={56} />}
@@ -84,19 +99,15 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, setSettings, staf
                   <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Patient Portal Transparency</h4>
                 </div>
                 <div className="grid grid-cols-1 gap-4">
-                  {[
-                    { id: 'summary', label: 'Clinical Summary' },
-                    { id: 'results', label: 'Treatment Results' },
-                    { id: 'careInstructions', label: 'Care Instructions' }
-                  ].map((item) => {
-                    const isVisible = settings.patientVisibility[item.id as keyof typeof settings.patientVisibility];
+                  {['summary', 'results', 'careInstructions'].map((itemId) => {
+                    const isVisible = settings.patientVisibility[itemId as keyof typeof settings.patientVisibility];
                     return (
                       <button 
-                        key={item.id}
-                        onClick={() => togglePatientVisibility(item.id as any)}
+                        key={itemId}
+                        onClick={() => togglePatientVisibility(itemId as any)}
                         className={`flex items-center justify-between p-5 rounded-2xl border transition-all ${isVisible ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : 'bg-slate-50 border-slate-100 text-slate-400 opacity-70'}`}
                       >
-                        <span className="font-bold">{item.label}</span>
+                        <span className="font-bold capitalize">{itemId.replace(/([A-Z])/g, ' $1')}</span>
                         {isVisible ? <Eye size={20} /> : <EyeOff size={20} />}
                       </button>
                     );
@@ -106,6 +117,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, setSettings, staf
             </div>
           </div>
 
+          {/* AI Clinical Modules Section */}
           <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 p-10">
             <div className="flex items-center gap-4 mb-8">
               <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl shadow-inner">
@@ -113,27 +125,44 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, setSettings, staf
               </div>
               <h3 className="font-black text-slate-800 text-2xl tracking-tight">Active Clinical Modules</h3>
             </div>
+            
             <div className="space-y-8">
+              {/* Patient AI Toggle */}
               <div className="flex items-center justify-between group">
                 <div className="max-w-[70%]">
-                  <p className="font-black text-slate-800 text-lg tracking-tight">Intelligent AI Advisor</p>
-                  <p className="text-sm text-slate-400 font-medium leading-relaxed">Public-facing treatment synthesis engine.</p>
+                  <p className="font-black text-slate-800 text-lg tracking-tight">Patient AI Consultant</p>
+                  <p className="text-sm text-slate-400 font-medium leading-relaxed">Offers treatment synthesis and service recommendations to patients.</p>
                 </div>
                 <button 
-                  onClick={() => setSettings(prev => ({ ...prev, aiConsultationEnabled: !prev.aiConsultationEnabled }))}
-                  className={`transition-all ${settings.aiConsultationEnabled ? 'text-indigo-600' : 'text-slate-300'}`}
+                  onClick={() => updateGlobalSetting('ai_patient_enabled', !settings.aiPatientEnabled, 'aiPatientEnabled')}
+                  className={`transition-all ${settings.aiPatientEnabled ? 'text-indigo-600' : 'text-slate-300'}`}
                 >
-                  {settings.aiConsultationEnabled ? <ToggleRight size={56} /> : <ToggleLeft size={56} />}
+                  {settings.aiPatientEnabled ? <ToggleRight size={56} /> : <ToggleLeft size={56} />}
                 </button>
               </div>
 
+              {/* Staff AI Toggle */}
+              <div className="flex items-center justify-between group">
+                <div className="max-w-[70%]">
+                  <p className="font-black text-slate-800 text-lg tracking-tight">Staff AI Assistant</p>
+                  <p className="text-sm text-slate-400 font-medium leading-relaxed">Helps practitioners generate after-session care instructions.</p>
+                </div>
+                <button 
+                  onClick={() => updateGlobalSetting('ai_staff_enabled', !settings.aiStaffEnabled, 'aiStaffEnabled')}
+                  className={`transition-all ${settings.aiStaffEnabled ? 'text-indigo-600' : 'text-slate-300'}`}
+                >
+                  {settings.aiStaffEnabled ? <ToggleRight size={56} /> : <ToggleLeft size={56} />}
+                </button>
+              </div>
+
+              {/* Photo Consultation Toggle */}
               <div className="flex items-center justify-between group">
                 <div className="max-w-[70%]">
                   <p className="font-black text-slate-800 text-lg tracking-tight">Distance Diagnostic Images</p>
                   <p className="text-sm text-slate-400 font-medium leading-relaxed">Allow patient photo uploads for consultation.</p>
                 </div>
                 <button 
-                  onClick={() => setSettings(prev => ({ ...prev, photoConsultationEnabled: !prev.photoConsultationEnabled }))}
+                  onClick={() => updateGlobalSetting('photo_consultation_enabled', !settings.photoConsultationEnabled, 'photoConsultationEnabled')}
                   className={`transition-all ${settings.photoConsultationEnabled ? 'text-indigo-600' : 'text-slate-300'}`}
                 >
                   {settings.photoConsultationEnabled ? <ToggleRight size={56} /> : <ToggleLeft size={56} />}
@@ -143,6 +172,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, setSettings, staf
           </div>
         </div>
 
+        {/* Staff Management Section */}
         <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden flex flex-col">
           <div className="p-10 border-b border-slate-50 flex items-center justify-between">
             <div className="flex items-center gap-4">
