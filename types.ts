@@ -3,6 +3,8 @@ export type UserRole = 'admin' | 'doctor' | 'patient';
 
 export interface ClinicSettings {
   aiConsultationEnabled: boolean;
+  aiPatientEnabled: boolean;  // New
+  aiStaffEnabled: boolean;    // New
   photoConsultationEnabled: boolean;
   restrictStaffLogs: boolean;
   patientVisibility: {
