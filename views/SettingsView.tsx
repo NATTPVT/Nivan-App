@@ -29,7 +29,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, setSettings, staf
     if (error) console.error(`Error updating ${columnName}:`, error);
   };
 
-  const togglePatientVisibility = async (part: key0f ClinicSettings['patientVisibility']) => {
+  const togglePatientVisibility = async (part: keyof ClinicSettings['patientVisibility']) => {
     const newVisibility = {
       ...settings.patientVisibility,
       [part]: !settings.patientVisibility[part]
