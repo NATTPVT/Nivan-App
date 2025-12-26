@@ -1,0 +1,10 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20" # Use a stable LTS version
+
+# This prevents Netlify from trying to manage database extensions
+[[plugins]]
+  package = "@netlify/plugin-lighthouse" # Optional: just an example of a safe plugin
