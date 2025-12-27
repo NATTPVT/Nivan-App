@@ -1,10 +1,9 @@
-
 export type UserRole = 'admin' | 'doctor' | 'patient';
 
 export interface ClinicSettings {
   aiConsultationEnabled: boolean;
-  aiPatientEnabled: boolean;  // New
-  aiStaffEnabled: boolean;    // New
+  aiPatientEnabled: boolean;
+  aiStaffEnabled: boolean;
   photoConsultationEnabled: boolean;
   restrictStaffLogs: boolean;
   patientVisibility: {
@@ -15,71 +14,61 @@ export interface ClinicSettings {
 }
 
 export const CLINIC_TREATMENTS = [
-  "Facial",
-  "CO2 Laser",
-  "Candela Laser",
-  "Diag Laser",
-  "Lose Weight Machine",
-  "Hair Implementation",
-  "Botox Injection",
-  "Mezo Gel Injection",
-  "Skin Tightening",
-  "Chemical Peel"
+  "Facial", "CO2 Laser", "Candela Laser", "Diag Laser",
+  "Lose Weight Machine", "Hair Implementation", "Botox Injection",
+  "Mezo Gel Injection", "Skin Tightening", "Chemical Peel"
 ];
 
 export interface ClinicStaff {
   id: string;
   name: string;
   username: string;
-  password?: string;
   specialty: string;
   role: 'admin' | 'doctor';
 }
 
+// FIXED: Matched to Supabase snake_case columns
 export interface Patient {
   id: string;
   name: string;
   phone: string;
-  password?: string;
-  email: string;
-  dob: string; // Used for age
+  email: string; // nullable in DB? We will handle it.
+  dob: string;
   notes: string;
-  createdAt: string;
+  password?: string; // Optional for UI security
+  created_at: string; // CHANGED from createdAt to match DB
   photos?: { id: string; url: string; timestamp: string; note: string }[];
 }
 
 export interface Appointment {
   id: string;
-  patientId: string;
-  dateTime: string;
+  patient_id: string; // CHANGED to snake_case
+  date_time: string;  // CHANGED to snake_case
   status: 'pending' | 'scheduled' | 'completed' | 'cancelled' | 'rejected';
   type: string;
-  assignedStaffId?: string;
-  originalSuggestedTime?: string;
-  isVerified: boolean;
+  assigned_staff_id?: string; // CHANGED
+  is_verified: boolean; // CHANGED
 }
 
 export interface SessionRecord {
   id: string;
-  appointmentId: string;
-  patientId: string;
-  doctorId: string;
-  timestamp: string;
+  appointment_id: string; // CHANGED
+  patient_id: string;     // CHANGED
+  doctor_id: string;      // CHANGED
+  created_at: string;     // CHANGED
   summary: string;
   results: string;
-  nextSessionDate?: string;
-  careInstructions: string;
-  treatmentType: string;
+  care_instructions: string; // CHANGED
+  treatment_type: string;    // CHANGED
 }
 
 export interface Notification {
   id: string;
-  patientId: string;
-  appointmentId?: string;
+  patient_id: string;
   type: 'welcome' | 'reminder_24h' | 'reminder_2h' | 'verification_request' | 'verification_confirm' | 'rejection';
   channel: 'WhatsApp' | 'SMS';
   content: string;
-  sentAt: string;
+  created_at: string;
   status: 'sent' | 'pending';
 }
 
