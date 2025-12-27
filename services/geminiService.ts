@@ -1,30 +1,35 @@
 import { GoogleGenerativeAI } from "@google/genai";
 
-// 1. Ensure the key is read correctly
-const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY || "");
+// Initialize with a fallback to avoid "undefined" crash on load
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
+const genAI = new GoogleGenerativeAI(apiKey);
 
 export const generateWelcomeMessage = async (patient: any) => {
-  // 2. Safety Check: If no API key, don't crash the app
-  if (!import.meta.env.VITE_GEMINI_API_KEY) {
-    console.error("AI Error: VITE_GEMINI_API_KEY is missing in environment variables.");
-    return `Welcome to the clinic, ${patient.name}! We look forward to seeing you.`;
-  }
+  if (!apiKey) return `Welcome ${patient.name}!`;
 
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-    const prompt = `Write a short, friendly 2-line welcome message for a new medical patient named ${patient.name}.`;
-    
+    const prompt = `Write a very short (1 sentence) friendly welcome message for a patient named ${patient.name} at a medical clinic.`;
     const result = await model.generateContent(prompt);
     const response = await result.response;
-    
-    // 3. Safety Check: Ensure response exists before reading
-    if (!response || !response.text) {
-      return "Welcome! We're glad to have you with us.";
-    }
+    return response.text() || "Welcome to our clinic!";
+  } catch (error) {
+    console.error("AI Error:", error);
+    return "Welcome to our clinic!";
+  }
+};
 
+export const consultPatientAI = async (concern: string) => {
+  if (!apiKey) return "AI Service is temporarily unavailable (Missing Key).";
+
+  try {
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+    const prompt = `You are a medical aesthetic assistant. A patient says: "${concern}". Recommend 1-2 treatments from this list: Facial, CO2 Laser, Botox, Chemical Peel. Keep it brief and professional.`;
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
     return response.text();
   } catch (error) {
-    console.error("Gemini AI failed:", error);
-    return "Welcome! Your registration was successful.";
+    console.error("AI Consult Error:", error);
+    return "Unable to generate recommendation at this time.";
   }
 };
