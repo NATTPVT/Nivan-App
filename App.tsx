@@ -18,23 +18,26 @@ const App: React.FC = () => {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [view, setView] = useState<View>('dashboard');
   
-  // Data State
   const [patients, setPatients] = useState<Patient[]>([]);
   const [staff, setStaff] = useState<ClinicStaff[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  
   const [settings, setSettings] = useState<ClinicSettings>({ 
     aiConsultationEnabled: true,
+    aiPatientEnabled: true,
+    aiStaffEnabled: true,
     photoConsultationEnabled: true,
     restrictStaffLogs: false,
     patientVisibility: { summary: true, results: true, careInstructions: true }
   });
 
-  // --- STEP 1: LOAD INITIAL DATA ---
+  // --- 1. ROBUST DATA FETCHING ---
   const fetchData = async () => {
     try {
-      const { data: pts } = await supabase.from('patients').select('*').order('created_at', { ascending: false });
+      const { data: pts, error: ptErr } = await supabase.from('patients').select('*').order('created_at', { ascending: false });
+      if (ptErr) console.error("Patients Error:", ptErr);
       if (pts) setPatients(pts);
 
       const { data: stf } = await supabase.from('staff').select('*');
@@ -49,94 +52,97 @@ const App: React.FC = () => {
       const { data: sett } = await supabase.from('settings').select('*').single();
       if (sett) {
         setSettings({
-          aiConsultationEnabled: sett.ai_consultation_enabled,
-          photoConsultationEnabled: sett.photo_consultation_enabled,
-          restrictStaffLogs: sett.restrict_staff_logs,
-          patientVisibility: sett.patient_visibility
+          aiConsultationEnabled: sett.ai_consultation_enabled ?? true,
+          aiPatientEnabled: sett.ai_patient_enabled ?? true,
+          aiStaffEnabled: sett.ai_staff_enabled ?? true,
+          photoConsultationEnabled: sett.photo_consultation_enabled ?? true,
+          restrictStaffLogs: sett.restrict_staff_logs ?? false,
+          patientVisibility: sett.patient_visibility ?? { summary: true, results: true, careInstructions: true }
         });
       }
     } catch (err) {
-      console.error("Fetch Error:", err);
+      console.error("Critical Fetch Error:", err);
     }
   };
 
-  // --- STEP 2: REAL-TIME SUBSCRIPTIONS (The Fix for Big Problems) ---
+  // --- 2. REALTIME SYNC ---
   useEffect(() => {
-    fetchData(); // Initial load
-
-    // Listen to changes in ANY table
+    fetchData();
     const channel = supabase
-      .channel('schema-db-changes')
+      .channel('main_db_changes')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => {
-        // When ANY change happens in the DB, refresh the data
+        console.log("Database changed, refreshing...");
         fetchData();
       })
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // --- STEP 3: PERSIST LOGIN ---
+  // --- 3. PERSIST LOGIN ---
   useEffect(() => {
-    const savedSession = JSON.parse(localStorage.getItem('mp_user_session') || 'null');
-    if (savedSession) {
-      setRole(savedSession.role);
-      setCurrentUserId(savedSession.id);
-      setView(savedSession.role === 'patient' ? 'patient-portal' : 'dashboard');
+    const session = JSON.parse(localStorage.getItem('mp_user_session') || 'null');
+    if (session) {
+      setRole(session.role);
+      setCurrentUserId(session.id);
+      setView(session.role === 'patient' ? 'patient-portal' : 'dashboard');
     }
   }, []);
 
   useEffect(() => {
     if (role && currentUserId) {
       localStorage.setItem('mp_user_session', JSON.stringify({ role, id: currentUserId }));
+    } else {
+      localStorage.removeItem('mp_user_session');
     }
   }, [role, currentUserId]);
 
-  const handleLogin = (role: UserRole, id: string) => {
-    setRole(role);
-    setCurrentUserId(id);
-    setView(role === 'patient' ? 'patient-portal' : 'dashboard');
+  // --- 4. FIXED REGISTER FUNCTION ---
+  const handleRegisterPatient = async (name: string, phone: string, pass: string) => {
+    const newId = crypto.randomUUID(); // Generate ID client-side to be safe
+    
+    // Prepare object with exact DB column names
+    const newPatient = {
+      id: newId,
+      name: name,
+      phone: phone,
+      password: pass,
+      email: '', // Send empty string if not provided
+      dob: '',
+      notes: 'Self-registered'
+    };
+
+    const { data, error } = await supabase.from('patients').insert([newPatient]).select();
+
+    if (error) {
+      console.error("Supabase Write Error:", error);
+      alert("Registration Error: " + error.message + " (Check console for details)");
+      return;
+    }
+
+    if (data) {
+      // Success! Log them in immediately.
+      handleLogin('patient', newId);
+      
+      // Try AI Welcome (Non-blocking)
+      generateWelcomeMessage(newPatient).then(msg => {
+        supabase.from('notifications').insert([{
+          patient_id: newId,
+          type: 'welcome',
+          channel: 'WhatsApp',
+          content: msg,
+          status: 'sent'
+        }]);
+      });
+    }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('mp_user_session');
     setRole(null);
     setCurrentUserId(null);
     setView('dashboard');
   };
 
-  // --- STEP 4: REGISTER PATIENT ---
-  const handleRegisterPatient = async (name: string, phone: string, pass: string) => {
-    const { data, error } = await supabase
-      .from('patients')
-      .insert([{ name, phone, password: pass, notes: 'Self-registered' }])
-      .select()
-      .single();
-
-    if (error) {
-      alert("Registration failed: " + error.message);
-      return;
-    }
-
-    if (data) {
-      // AI Welcome Message
-      try {
-        const welcomeContent = await generateWelcomeMessage(data);
-        await supabase.from('notifications').insert([{
-          patient_id: data.id,
-          type: 'welcome',
-          content: welcomeContent,
-          status: 'sent'
-        }]);
-      } catch (aiErr) {
-        console.error("AI Error:", aiErr);
-      }
-      handleLogin('patient', data.id);
-    }
-  };
-
+  // --- RENDER ---
   if (!role || !currentUserId) {
     return <AuthView patients={patients} staff={staff} onLogin={handleLogin} onRegisterPatient={handleRegisterPatient} />;
   }
@@ -145,34 +151,21 @@ const App: React.FC = () => {
     ? patients.find(p => p.id === currentUserId) 
     : staff.find(s => s.id === currentUserId);
 
-  // Render Logic (remains same but uses live data)
   const renderView = () => {
     if (role === 'patient') {
-      return (
-        <PatientPortal 
-          patient={currentUser as Patient} 
-          appointments={appointments}
-          setAppointments={setAppointments}
-          sessions={sessions}
-          settings={settings}
-          setPatients={setPatients}
-        />
-      );
+      return <PatientPortal patient={currentUser as Patient} appointments={appointments} setAppointments={setAppointments} sessions={sessions} settings={settings} setPatients={setPatients} />;
     }
-
-    const filteredAppointments = (role === 'admin') 
-      ? appointments 
-      : appointments.filter(a => a.assignedStaffId === currentUserId);
+    const filteredApps = role === 'admin' ? appointments : appointments.filter(a => a.assigned_staff_id === currentUserId);
 
     switch(view) {
-      case 'dashboard': return <Dashboard patients={patients} appointments={filteredAppointments} onNavigate={setView} role={role} staffName={currentUser?.name} />;
+      case 'dashboard': return <Dashboard patients={patients} appointments={filteredApps} onNavigate={setView} role={role} staffName={currentUser?.name} />;
       case 'patients': return <PatientsView patients={patients} setPatients={setPatients} notifications={notifications} setNotifications={setNotifications} sessions={sessions} role={role} />;
       case 'appointments': return <AppointmentsView appointments={appointments} setAppointments={setAppointments} patients={patients} notifications={notifications} setNotifications={setNotifications} role={role} currentStaffId={currentUserId} staff={staff} />;
       case 'sessions': return <SessionsView sessions={sessions} setSessions={setSessions} patients={patients} appointments={appointments} setAppointments={setAppointments} role={role} currentStaffId={currentUserId} settings={settings} staff={staff} />;
       case 'notifications': return <NotificationsView notifications={notifications} patients={patients} />;
       case 'settings': return <SettingsView settings={settings} setSettings={setSettings} staff={staff} setStaff={setStaff} role={role} />;
       case 'photos': return <PhotosView patients={patients} settings={settings} role={role} currentStaffId={currentUserId} />;
-      default: return <Dashboard patients={patients} appointments={filteredAppointments} onNavigate={setView} role={role} />;
+      default: return <Dashboard patients={patients} appointments={filteredApps} onNavigate={setView} role={role} />;
     }
   };
 
